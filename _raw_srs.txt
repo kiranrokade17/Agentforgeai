@@ -1,0 +1,1095 @@
+{
+  "schemaVersion": "1.0.0",
+  "documentType": "SoftwareRequirementsSpecification",
+  "document": {
+    "id": "SRS-TODO-API-001",
+    "title": "Simple Todo List REST API — Software Requirements Specification",
+    "version": "1.0.0",
+    "status": "Approved",
+    "date": "2025-01-01",
+    "author": "AgentForge AI — Lead Software Architect",
+    "standard": "IEEE 830-1998 (adapted) / ISO-IEC-IEEE 29148",
+    "classification": "Internal"
+  },
+  "revisionHistory": [
+    {
+      "version": "0.1.0",
+      "date": "2024-12-20",
+      "author": "AgentForge AI",
+      "description": "Initial draft: scope, functional requirements, data model."
+    },
+    {
+      "version": "0.9.0",
+      "date": "2024-12-28",
+      "author": "AgentForge AI",
+      "description": "Added API contract, non-functional requirements, acceptance criteria."
+    },
+    {
+      "version": "1.0.0",
+      "date": "2025-01-01",
+      "author": "AgentForge AI",
+      "description": "Baselined. Added traceability matrix, risks, and out-of-scope items."
+    }
+  ],
+  "introduction": {
+    "purpose": "Define the complete, verifiable requirements for a single-tenant Todo List REST API implemented with FastAPI (Python) and PostgreSQL. This document is the contractual basis for design, implementation, testing, and acceptance.",
+    "scope": {
+      "inScope": [
+        "CRUD operations over Todo items exposed as a versioned JSON REST API.",
+        "Filtering, sorting, searching, and pagination of Todo collections.",
+        "Completion state tracking with timestamps.",
+        "Aggregate statistics endpoint.",
+        "Liveness and readiness health endpoints.",
+        "Auto-generated OpenAPI 3.1 documentation.",
+        "PostgreSQL persistence with schema migrations.",
+        "Containerized local and production deployment."
+      ],
+      "outOfScope": [
+        "User accounts, authentication, and authorization (v1 is single-tenant, unauthenticated).",
+        "Multi-user data isolation and sharing.",
+        "Web or mobile front-end clients.",
+        "Real-time push (WebSocket/SSE) notifications.",
+        "File attachments, rich text, or subtasks.",
+        "Recurring tasks and calendar integration.",
+        "Email or push reminders.",
+        "Full-text search engine integration (Elasticsearch/OpenSearch).",
+        "Analytics warehouse or reporting dashboards."
+      ]
+    },
+    "intendedAudience": [
+      "Backend engineers implementing the service.",
+      "QA engineers deriving test cases.",
+      "DevOps engineers provisioning infrastructure.",
+      "Technical product owners validating scope."
+    ],
+    "definitions": [
+      { "term": "Todo", "definition": "A single task record with a title, optional description, priority, optional due date, and completion state." },
+      { "term": "REST", "definition": "Representational State Transfer architectural style using HTTP verbs and resource-oriented URIs." },
+      { "term": "FastAPI", "definition": "Python ASGI web framework used to implement the HTTP layer and OpenAPI generation." },
+      { "term": "Pydantic", "definition": "Data validation library used for request/response schema enforcement." },
+      { "term": "SQLAlchemy", "definition": "Python ORM and SQL toolkit used for persistence." },
+      { "term": "Alembic", "definition": "Database migration tool for SQLAlchemy-managed schemas." },
+      { "term": "UUID v4", "definition": "Randomly generated 128-bit universally unique identifier used as the primary key." },
+      { "term": "RFC 3339", "definition": "Timestamp format used for all date-time fields, e.g. 2025-01-01T12:00:00Z." },
+      { "term": "p95", "definition": "The 95th percentile of a latency distribution." },
+      { "term": "Idempotent", "definition": "An operation whose repeated application yields the same server state." }
+    ],
+    "references": [
+      { "id": "REF-001", "title": "RFC 9110 — HTTP Semantics", "uri": "https://www.rfc-editor.org/rfc/rfc9110" },
+      { "id": "REF-002", "title": "RFC 9457 — Problem Details for HTTP APIs", "uri": "https://www.rfc-editor.org/rfc/rfc9457" },
+      { "id": "REF-003", "title": "OpenAPI Specification 3.1.0", "uri": "https://spec.openapis.org/oas/v3.1.0" },
+      { "id": "REF-004", "title": "FastAPI Documentation", "uri": "https://fastapi.tiangolo.com/" },
+      { "id": "REF-005", "title": "PostgreSQL 16 Documentation", "uri": "https://www.postgresql.org/docs/16/" },
+      { "id": "REF-006", "title": "ISO/IEC/IEEE 29148:2018 — Requirements Engineering", "uri": "https://www.iso.org/standard/72089.html" }
+    ]
+  },
+  "overallDescription": {
+    "productPerspective": "A standalone, stateless HTTP service backed by a single PostgreSQL database. It is the system of record for Todo items and is intended to be consumed by any HTTP client. The service is horizontally scalable behind a load balancer because no server-side session state is retained.",
+    "productFunctions": [
+      "Create, read, update, and delete Todo items.",
+      "Query Todo collections with filtering, sorting, searching, and pagination.",
+      "Track completion state and completion timestamps.",
+      "Report aggregate counts of Todo items.",
+      "Expose operational health and readiness signals.",
+      "Publish machine-readable OpenAPI documentation."
+    ],
+    "userClasses": [
+      {
+        "name": "API Consumer (Client Application)",
+        "description": "Any HTTP client (CLI, script, SPA, mobile app) that performs CRUD operations.",
+        "frequency": "High"
+      },
+      {
+        "name": "Operator / DevOps Engineer",
+        "description": "Deploys, monitors, and scales the service; consumes health endpoints and logs.",
+        "frequency": "Medium"
+      },
+      {
+        "name": "Developer / Integrator",
+        "description": "Reads OpenAPI documentation to integrate against the API.",
+        "frequency": "Medium"
+      }
+    ],
+    "operatingEnvironment": {
+      "runtime": "Python 3.11 or newer",
+      "framework": "FastAPI with Uvicorn ASGI server",
+      "database": "PostgreSQL 14 or newer",
+      "driver": "asyncpg via SQLAlchemy 2.x async engine",
+      "containerization": "Docker image; docker-compose for local development",
+      "platform": "Linux x86_64 or arm64 container host",
+      "network": "HTTP/1.1 and HTTP/2 over TLS terminated at the ingress/load balancer"
+    },
+    "designConstraints": [
+      "The HTTP layer MUST be implemented with FastAPI.",
+      "Persistence MUST use PostgreSQL; no other database engine is permitted in v1.",
+      "All request and response bodies MUST be JSON encoded as UTF-8.",
+      "All timestamps MUST be stored and returned in UTC using RFC 3339 format.",
+      "All schema changes MUST be applied through versioned Alembic migrations.",
+      "The service MUST be deployable as a single stateless container image.",
+      "The API MUST be versioned in the URI path under /api/v1."
+    ],
+    "assumptions": [
+      "A single PostgreSQL instance is available and reachable at startup.",
+      "Clients send well-formed JSON with Content-Type: application/json.",
+      "Client clocks are not trusted; all timestamps are server-generated.",
+      "Traffic volume in v1 does not exceed 100 requests per second sustained.",
+      "The dataset is expected to remain below 10 million Todo rows in v1."
+    ],
+    "dependencies": [
+      { "id": "DEP-001", "name": "PostgreSQL", "type": "Infrastructure", "criticality": "Required" },
+      { "id": "DEP-002", "name": "FastAPI", "type": "Library", "criticality": "Required" },
+      { "id": "DEP-003", "name": "Pydantic v2", "type": "Library", "criticality": "Required" },
+      { "id": "DEP-004", "name": "SQLAlchemy 2.x", "type": "Library", "criticality": "Required" },
+      { "id": "DEP-005", "name": "Alembic", "type": "Library", "criticality": "Required" },
+      { "id": "DEP-006", "name": "Uvicorn", "type": "Library", "criticality": "Required" },
+      { "id": "DEP-007", "name": "pytest + httpx", "type": "Library", "criticality": "Required for verification" }
+    ]
+  },
+  "functionalRequirements": [
+    {
+      "groupId": "FR-G1",
+      "groupName": "Todo Creation",
+      "requirements": [
+        {
+          "id": "FR-001",
+          "title": "Create a Todo",
+          "description": "The system SHALL expose POST /api/v1/todos accepting a JSON body and creating a new Todo record.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-001"
+        },
+        {
+          "id": "FR-002",
+          "title": "Title validation",
+          "description": "The system SHALL require a non-blank title of 1 to 200 characters after trimming leading and trailing whitespace.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-002"
+        },
+        {
+          "id": "FR-003",
+          "title": "Optional description",
+          "description": "The system SHALL accept an optional description of at most 2000 characters and SHALL default it to null when omitted.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-003"
+        },
+        {
+          "id": "FR-004",
+          "title": "Priority enumeration",
+          "description": "The system SHALL accept an optional priority with allowed values low, medium, or high, defaulting to medium when omitted.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-004"
+        },
+        {
+          "id": "FR-005",
+          "title": "Optional due date",
+          "description": "The system SHALL accept an optional due_date as an RFC 3339 timestamp and SHALL reject values that are not parseable.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-005"
+        },
+        {
+          "id": "FR-006",
+          "title": "Server-assigned fields",
+          "description": "On creation the system SHALL assign a UUID v4 id, set completed to false, set created_at and updated_at to the current UTC time, and set completed_at to null. Client-supplied values for these fields SHALL be ignored.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-006"
+        },
+        {
+          "id": "FR-007",
+          "title": "Creation response",
+          "description": "On successful creation the system SHALL return HTTP 201 with the full Todo representation and a Location header containing the canonical resource URI.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-007"
+        },
+        {
+          "id": "FR-008",
+          "title": "Creation validation failure",
+          "description": "On invalid input the system SHALL return HTTP 422 with a structured error body enumerating each offending field and reason, and SHALL NOT persist any record.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-008"
+        }
+      ]
+    },
+    {
+      "groupId": "FR-G2",
+      "groupName": "Todo Retrieval",
+      "requirements": [
+        {
+          "id": "FR-010",
+          "title": "Retrieve a single Todo",
+          "description": "The system SHALL expose GET /api/v1/todos/{id} returning the Todo representation for a valid UUID.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-010"
+        },
+        {
+          "id": "FR-011",
+          "title": "Not-found handling",
+          "description": "The system SHALL return HTTP 404 with error code TODO_NOT_FOUND when the requested id does not exist, and HTTP 422 when the id is not a valid UUID.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-011"
+        },
+        {
+          "id": "FR-012",
+          "title": "List Todos",
+          "description": "The system SHALL expose GET /api/v1/todos returning a paginated collection of Todo items.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-012"
+        },
+        {
+          "id": "FR-013",
+          "title": "Pagination",
+          "description": "The system SHALL support limit (default 20, minimum 1, maximum 100) and offset (default 0, minimum 0) query parameters and SHALL return total, limit, and offset in the response envelope.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-013"
+        },
+        {
+          "id": "FR-014",
+          "title": "Filter by completion",
+          "description": "The system SHALL support an optional boolean completed query parameter that restricts results to matching completion state.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-014"
+        },
+        {
+          "id": "FR-015",
+          "title": "Filter by priority",
+          "description": "The system SHALL support an optional repeatable priority query parameter accepting one or more of low, medium, high.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-015"
+        },
+        {
+          "id": "FR-016",
+          "title": "Filter by due date range",
+          "description": "The system SHALL support optional due_before and due_after RFC 3339 query parameters that bound the due_date field inclusively.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-016"
+        },
+        {
+          "id": "FR-017",
+          "title": "Text search",
+          "description": "The system SHALL support an optional q query parameter performing a case-insensitive substring match against title and description.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-017"
+        },
+        {
+          "id": "FR-018",
+          "title": "Sorting",
+          "description": "The system SHALL support sort_by with allowed values created_at, updated_at, due_date, or priority (default created_at) and order with allowed values asc or desc (default desc). Results SHALL be deterministically tie-broken by id.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-018"
+        },
+        {
+          "id": "FR-019",
+          "title": "Collection envelope",
+          "description": "The list response SHALL be a JSON object containing items (array), total (integer), limit (integer), and offset (integer).",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-019"
+        }
+      ]
+    },
+    {
+      "groupId": "FR-G3",
+      "groupName": "Todo Update",
+      "requirements": [
+        {
+          "id": "FR-020",
+          "title": "Full replacement",
+          "description": "The system SHALL expose PUT /api/v1/todos/{id} replacing the mutable fields title, description, priority, due_date, and completed.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-020"
+        },
+        {
+          "id": "FR-021",
+          "title": "Partial update",
+          "description": "The system SHALL expose PATCH /api/v1/todos/{id} applying only the fields present in the request body and leaving all other fields unchanged.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-021"
+        },
+        {
+          "id": "FR-022",
+          "title": "Completion timestamp semantics",
+          "description": "When completed transitions from false to true the system SHALL set completed_at to the current UTC time. When completed transitions from true to false the system SHALL set completed_at to null. Redundant assignments SHALL NOT alter completed_at.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-022"
+        },
+        {
+          "id": "FR-023",
+          "title": "Update timestamp",
+          "description": "The system SHALL set updated_at to the current UTC time on every successful mutation.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-023"
+        },
+        {
+          "id": "FR-024",
+          "title": "Update validation",
+          "description": "The system SHALL apply the same field validation rules as creation and SHALL return HTTP 422 without mutating state when validation fails.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-024"
+        },
+        {
+          "id": "FR-025",
+          "title": "Update of unknown resource",
+          "description": "The system SHALL return HTTP 404 with error code TODO_NOT_FOUND when updating a non-existent id.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-025"
+        },
+        {
+          "id": "FR-026",
+          "title": "Empty patch rejection",
+          "description": "The system SHALL return HTTP 422 with error code EMPTY_PATCH when a PATCH request body contains no recognized fields.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-026"
+        }
+      ]
+    },
+    {
+      "groupId": "FR-G4",
+      "groupName": "Todo Deletion",
+      "requirements": [
+        {
+          "id": "FR-030",
+          "title": "Delete a Todo",
+          "description": "The system SHALL expose DELETE /api/v1/todos/{id} permanently removing the record and returning HTTP 204 with an empty body.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-030"
+        },
+        {
+          "id": "FR-031",
+          "title": "Delete of unknown resource",
+          "description": "The system SHALL return HTTP 404 with error code TODO_NOT_FOUND when deleting a non-existent id.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-031"
+        },
+        {
+          "id": "FR-032",
+          "title": "Delete idempotency",
+          "description": "A repeated DELETE on an already-deleted id SHALL return HTTP 404 and SHALL NOT produce a server error.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-032"
+        }
+      ]
+    },
+    {
+      "groupId": "FR-G5",
+      "groupName": "Statistics",
+      "requirements": [
+        {
+          "id": "FR-040",
+          "title": "Todo statistics",
+          "description": "The system SHALL expose GET /api/v1/todos/stats returning total, completed, active, and overdue counts, plus a breakdown by priority.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-040"
+        },
+        {
+          "id": "FR-041",
+          "title": "Overdue definition",
+          "description": "A Todo SHALL be counted as overdue when completed is false and due_date is earlier than the current UTC time.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-041"
+        }
+      ]
+    },
+    {
+      "groupId": "FR-G6",
+      "groupName": "Operational Endpoints",
+      "requirements": [
+        {
+          "id": "FR-050",
+          "title": "Liveness probe",
+          "description": "The system SHALL expose GET /health returning HTTP 200 with status ok whenever the process is running, independent of database state.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-050"
+        },
+        {
+          "id": "FR-051",
+          "title": "Readiness probe",
+          "description": "The system SHALL expose GET /ready returning HTTP 200 when a database round-trip succeeds within 2 seconds and HTTP 503 otherwise.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-051"
+        }
+      ]
+    },
+    {
+      "groupId": "FR-G7",
+      "groupName": "Error Handling and Documentation",
+      "requirements": [
+        {
+          "id": "FR-060",
+          "title": "Uniform error envelope",
+          "description": "All error responses SHALL use the JSON shape {error: {code, message, details, request_id}} where code is a stable machine-readable string, message is human-readable, details is an array of field-level issues or null, and request_id echoes the X-Request-ID header.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-060"
+        },
+        {
+          "id": "FR-061",
+          "title": "Unhandled exception handling",
+          "description": "The system SHALL catch unhandled exceptions, log them with the request_id, and return HTTP 500 with error code INTERNAL_ERROR without leaking stack traces or SQL text.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-061"
+        },
+        {
+          "id": "FR-062",
+          "title": "Request correlation",
+          "description": "The system SHALL accept an inbound X-Request-ID header or generate a UUID when absent, include it in all log records for the request, and echo it in the response header.",
+          "priority": "Must",
+          "verification": "Test",
+          "acceptanceRef": "AC-062"
+        },
+        {
+          "id": "FR-063",
+          "title": "OpenAPI documentation",
+          "description": "The system SHALL serve interactive documentation at /docs and the machine-readable OpenAPI 3.1 document at /openapi.json, covering every endpoint, schema, and error response.",
+          "priority": "Must",
+          "verification": "Inspection",
+          "acceptanceRef": "AC-063"
+        },
+        {
+          "id": "FR-064",
+          "title": "Method not allowed",
+          "description": "The system SHALL return HTTP 405 with error code METHOD_NOT_ALLOWED for unsupported HTTP methods on a known path.",
+          "priority": "Should",
+          "verification": "Test",
+          "acceptanceRef": "AC-064"
+        }
+      ]
+    }
+  ],
+  "externalInterfaces": {
+    "apiEndpoints": [
+      {
+        "id": "API-001",
+        "method": "POST",
+        "path": "/api/v1/todos",
+        "summary": "Create a Todo",
+        "requestBody": "TodoCreate",
+        "successStatus": 201,
+        "successBody": "TodoRead",
+        "errorStatuses": [422, 500],
+        "requirementRefs": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008"]
+      },
+      {
+        "id": "API-002",
+        "method": "GET",
+        "path": "/api/v1/todos",
+        "summary": "List Todos with filtering, sorting, and pagination",
+        "queryParameters": ["completed", "priority", "due_before", "due_after", "q", "sort_by", "order", "limit", "offset"],
+        "successStatus": 200,
+        "successBody": "TodoListResponse",
+        "errorStatuses": [422, 500],
+        "requirementRefs": ["FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019"]
+      },
+      {
+        "id": "API-003",
+        "method": "GET",
+        "path": "/api/v1/todos/{id}",
+        "summary": "Retrieve a single Todo",
+        "pathParameters": ["id (uuid)"],
+        "successStatus": 200,
+        "successBody": "TodoRead",
+        "errorStatuses": [404, 422, 500],
+        "requirementRefs": ["FR-010", "FR-011"]
+      },
+      {
+        "id": "API-004",
+        "method": "PUT",
+        "path": "/api/v1/todos/{id}",
+        "summary": "Replace a Todo",
+        "pathParameters": ["id (uuid)"],
+        "requestBody": "TodoReplace",
+        "successStatus": 200,
+        "successBody": "TodoRead",
+        "errorStatuses": [404, 422, 500],
+        "requirementRefs": ["FR-020", "FR-024", "FR-025"]
+      },
+      {
+        "id": "API-005",
+        "method": "PATCH",
+        "path": "/api/v1/todos/{id}",
+        "summary": "Partially update a Todo",
+        "pathParameters": ["id (uuid)"],
+        "requestBody": "TodoUpdate",
+        "successStatus": 200,
+        "successBody": "TodoRead",
+        "errorStatuses": [404, 422, 500],
+        "requirementRefs": ["FR-021", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026"]
+      },
+      {
+        "id": "API-006",
+        "method": "DELETE",
+        "path": "/api/v1/todos/{id}",
+        "summary": "Delete a Todo",
+        "pathParameters": ["id (uuid)"],
+        "successStatus": 204,
+        "successBody": null,
+        "errorStatuses": [404, 422, 500],
+        "requirementRefs": ["FR-030", "FR-031", "FR-032"]
+      },
+      {
+        "id": "API-007",
+        "method": "GET",
+        "path": "/api/v1/todos/stats",
+        "summary": "Aggregate Todo statistics",
+        "successStatus": 200,
+        "successBody": "TodoStats",
+        "errorStatuses": [500],
+        "requirementRefs": ["FR-040", "FR-041"]
+      },
+      {
+        "id": "API-008",
+        "method": "GET",
+        "path": "/health",
+        "summary": "Liveness probe",
+        "successStatus": 200,
+        "successBody": "HealthResponse",
+        "errorStatuses": [],
+        "requirementRefs": ["FR-050"]
+      },
+      {
+        "id": "API-009",
+        "method": "GET",
+        "path": "/ready",
+        "summary": "Readiness probe",
+        "successStatus": 200,
+        "successBody": "HealthResponse",
+        "errorStatuses": [503],
+        "requirementRefs": ["FR-051"]
+      }
+    ],
+    "schemas": [
+      {
+        "name": "TodoCreate",
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": ["string", "null"], "maxLength": 2000 },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"], "default": "medium" },
+          "due_date": { "type": ["string", "null"], "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      {
+        "name": "TodoUpdate",
+        "type": "object",
+        "required": [],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": ["string", "null"], "maxLength": 2000 },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+          "due_date": { "type": ["string", "null"], "format": "date-time" },
+          "completed": { "type": "boolean" }
+        },
+        "additionalProperties": false,
+        "minProperties": 1
+      },
+      {
+        "name": "TodoReplace",
+        "type": "object",
+        "required": ["title", "completed"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": ["string", "null"], "maxLength": 2000 },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"], "default": "medium" },
+          "due_date": { "type": ["string", "null"], "format": "date-time" },
+          "completed": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      {
+        "name": "TodoRead",
+        "type": "object",
+        "required": ["id", "title", "description", "priority", "due_date", "completed", "completed_at", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+          "due_date": { "type": ["string", "null"], "format": "date-time" },
+          "completed": { "type": "boolean" },
+          "completed_at": { "type": ["string", "null"], "format": "date-time" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      {
+        "name": "TodoListResponse",
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": { "type": "array", "items": "TodoRead" },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "offset": { "type": "integer", "minimum": 0 }
+        }
+      },
+      {
+        "name": "TodoStats",
+        "type": "object",
+        "required": ["total", "completed", "active", "overdue", "by_priority"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "completed": { "type": "integer", "minimum": 0 },
+          "active": { "type": "integer", "minimum": 0 },
+          "overdue": { "type": "integer", "minimum": 0 },
+          "by_priority": {
+            "type": "object",
+            "properties": {
+              "low": { "type": "integer", "minimum": 0 },
+              "medium": { "type": "integer", "minimum": 0 },
+              "high": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      },
+      {
+        "name": "ErrorResponse",
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details", "request_id"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "details": { "type": ["array", "null"], "items": "object" },
+              "request_id": { "type": "string" }
+            }
+          }
+        }
+      },
+      {
+        "name": "HealthResponse",
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "degraded"] },
+          "database": { "type": "string", "enum": ["up", "down"] },
+          "version": { "type": "string" }
+        }
+      }
+    ],
+    "errorCodes": [
+      { "code": "VALIDATION_ERROR", "httpStatus": 422, "description": "Request body or query parameters failed schema validation." },
+      { "code": "TODO_NOT_FOUND", "httpStatus": 404, "description": "No Todo exists for the supplied identifier." },
+      { "code": "EMPTY_PATCH", "httpStatus": 422, "description": "PATCH body contained no recognized fields." },
+      { "code": "METHOD_NOT_ALLOWED", "httpStatus": 405, "description": "HTTP method not supported for the requested path." },
+      { "code": "NOT_FOUND", "httpStatus": 404, "description": "No route matches the requested path." },
+      { "code": "INTERNAL_ERROR", "httpStatus": 500, "description": "Unexpected server-side failure." },
+      { "code": "SERVICE_UNAVAILABLE", "httpStatus": 503, "description": "Dependency (database) unavailable." }
+    ],
+    "softwareInterfaces": [
+      {
+        "id": "SI-001",
+        "name": "PostgreSQL Database",
+        "protocol": "PostgreSQL wire protocol over TCP",
+        "direction": "Bidirectional",
+        "description": "Primary persistence. Accessed via SQLAlchemy 2.x async engine with asyncpg driver and a bounded connection pool."
+      },
+      {
+        "id": "SI-002",
+        "name": "Container Orchestrator",
+        "protocol": "HTTP",
+        "direction": "Inbound",
+        "description": "Consumes /health and /ready for liveness and readiness gating."
+      },
+      {
+        "id": "SI-003",
+        "name": "Log Aggregator",
+        "protocol": "stdout JSON lines",
+        "direction": "Outbound",
+        "description": "Collects structured application logs."
+      }
+    ],
+    "communicationProtocols": [
+      "HTTP/1.1 and HTTP/2",
+      "TLS 1.2 or newer at the ingress",
+      "JSON payloads encoded as UTF-8",
+      "Content-Type: application/json for request bodies",
+      "X-Request-ID header for correlation"
+    ]
+  },
+  "dataModel": {
+    "entities": [
+      {
+        "name": "Todo",
+        "table": "todos",
+        "primaryKey": "id",
+        "fields": [
+          { "name": "id", "type": "UUID", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+          { "name": "title", "type": "VARCHAR(200)", "nullable": false, "constraints": ["CHECK (length(trim(title)) > 0)"] },
+          { "name": "description", "type": "TEXT", "nullable": true, "constraints": ["CHECK (description IS NULL OR length(description) <= 2000)"] },
+          { "name": "priority", "type": "VARCHAR(10)", "nullable": false, "default": "'medium'", "constraints": ["CHECK (priority IN ('low','medium','high'))"] },
+          { "name": "due_date", "type": "TIMESTAMPTZ", "nullable": true, "constraints": [] },
+          { "name": "completed", "type": "BOOLEAN", "nullable": false, "default": "false", "constraints": [] },
+          { "name": "completed_at", "type": "TIMESTAMPTZ", "nullable": true, "constraints": ["CHECK ((completed = false AND completed_at IS NULL) OR completed = true)"] },
+          { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "now()", "constraints": [] },
+          { "name": "updated_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "now()", "constraints": [] }
+        ],
+        "indexes": [
+          { "name": "ix_todos_completed", "columns": ["completed"], "type": "btree" },
+          { "name": "ix_todos_priority", "columns": ["priority"], "type": "btree" },
+          { "name": "ix_todos_due_date", "columns": ["due_date"], "type": "btree", "where": "due_date IS NOT NULL" },
+          { "name": "ix_todos_created_at", "columns": ["created_at"], "type": "btree" },
+          { "name": "ix_todos_updated_at", "columns": ["updated_at"], "type": "btree" }
+        ],
+        "relationships": []
+      }
+    ],
+    "integrityRules": [
+      "id MUST be unique and immutable after creation.",
+      "created_at MUST be immutable after creation.",
+      "updated_at MUST be greater than or equal to created_at.",
+      "completed_at MUST be null when completed is false.",
+      "completed_at MUST be non-null when completed is true.",
+      "All TIMESTAMPTZ values MUST be stored in UTC."
+    ],
+    "migrationStrategy": "Alembic revision-per-change; migrations MUST be forward-only and idempotent-safe; each migration MUST be reversible or explicitly documented as irreversible."
+  },
+  "nonFunctionalRequirements": [
+    {
+      "id": "NFR-PERF-001",
+      "category": "Performance",
+      "description": "GET /api/v1/todos with limit=20 SHALL achieve p95 latency of 150 ms or less at 50 concurrent clients against a dataset of 100,000 Todos.",
+      "priority": "Must",
+      "verification": "Load test"
+    },
+    {
+      "id": "NFR-PERF-002",
+      "category": "Performance",
+      "description": "GET /api/v1/todos/{id} and POST /api/v1/todos SHALL achieve p95 latency of 100 ms or less at 50 concurrent clients.",
+      "priority": "Must",
+      "verification": "Load test"
+    },
+    {
+      "id": "NFR-PERF-003",
+      "category": "Performance",
+      "description": "The service SHALL sustain 100 requests per second with an error rate below 0.1 percent on a 2 vCPU / 2 GiB container.",
+      "priority": "Must",
+      "verification": "Load test"
+    },
+    {
+      "id": "NFR-PERF-004",
+      "category": "Performance",
+      "description": "The database connection pool SHALL be bounded with a configurable maximum (default 10) and a connection acquisition timeout of 5 seconds.",
+      "priority": "Must",
+      "verification": "Inspection"
+    },
+    {
+      "id": "NFR-SEC-001",
+      "category": "Security",
+      "description": "All database access SHALL use parameterized queries via SQLAlchemy; string-concatenated SQL is prohibited.",
+      "priority": "Must",
+      "verification": "Code review"
+    },
+    {
+      "id": "NFR-SEC-002",
+      "category": "Security",
+      "description": "All inbound payloads SHALL be validated by Pydantic models with additionalProperties disabled; unknown fields SHALL be rejected.",
+      "priority": "Must",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-SEC-003",
+      "category": "Security",
+      "description": "Credentials and connection strings SHALL be supplied via environment variables or a secret manager and SHALL NOT appear in source control, images, or logs.",
+      "priority": "Must",
+      "verification": "Inspection"
+    },
+    {
+      "id": "NFR-SEC-004",
+      "category": "Security",
+      "description": "CORS SHALL be disabled by default and configurable through an explicit origin allowlist; wildcard origins with credentials are prohibited.",
+      "priority": "Must",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-SEC-005",
+      "category": "Security",
+      "description": "Error responses SHALL NOT disclose stack traces, SQL statements, file paths, or internal identifiers.",
+      "priority": "Must",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-SEC-006",
+      "category": "Security",
+      "description": "Request body size SHALL be limited to 1 MiB; larger payloads SHALL be rejected with HTTP 413.",
+      "priority": "Should",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-REL-001",
+      "category": "Reliability",
+      "description": "The service SHALL retry transient database connection failures at startup with exponential backoff for up to 30 seconds before exiting non-zero.",
+      "priority": "Must",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-REL-002",
+      "category": "Reliability",
+      "description": "The service SHALL handle SIGTERM by ceasing to accept new connections, completing in-flight requests within 25 seconds, and closing the connection pool.",
+      "priority": "Must",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-REL-003",
+      "category": "Reliability",
+      "description": "Monthly availability SHALL be at least 99.5 percent, excluding scheduled maintenance.",
+      "priority": "Should",
+      "verification": "Monitoring"
+    },
+    {
+      "id": "NFR-REL-004",
+      "category": "Reliability",
+      "description": "Each mutating request SHALL execute within a single database transaction that is committed on success and rolled back on any failure.",
+      "priority": "Must",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-OBS-001",
+      "category": "Observability",
+      "description": "The service SHALL emit structured JSON logs to stdout containing timestamp, level, request_id, method, path, status_code, and duration_ms for every request.",
+      "priority": "Must",
+      "verification": "Inspection"
+    },
+    {
+      "id": "NFR-OBS-002",
+      "category": "Observability",
+      "description": "The service SHALL expose request count, request duration histogram, and error count metrics in Prometheus text format at /metrics.",
+      "priority": "Should",
+      "verification": "Test"
+    },
+    {
+      "id": "NFR-MAINT-001",
+      "category": "Maintainability",
+      "description": "Code SHALL be organized into layers: routers (HTTP), services (business logic), repositories (persistence), and schemas/models (types). Routers SHALL NOT contain SQL.",
+      "priority": "Must",
+      "verification": "Code review"
+    },
+    {
+      "id": "NFR-MAINT-002",
+      "category": "Maintainability",
+      "description": "All public functions SHALL carry type annotations and the codebase SHALL pass mypy in strict mode and ruff linting with zero errors.",
+      "priority": "Must",
+      "verification": "CI"
+    },
+    {
+      "id": "NFR-MAINT-003",
+      "category": "Maintainability",
+      "description": "Automated test coverage SHALL be at least 85 percent line coverage, including unit tests for services and integration tests against a real PostgreSQL instance.",
+      "priority": "Must",
+      "verification": "CI"
+    },
+    {
+      "id": "NFR-MAINT-004",
+      "category": "Maintainability",
+      "description": "Every database schema change SHALL be accompanied by an Alembic migration and a corresponding test.",
+      "priority": "Must",
+      "verification": "Code review"
+    },
+    {
+      "id": "NFR-PORT-001",
+      "category": "Portability",
+      "description": "The service SHALL be packaged as an OCI-compliant container image under 250 MiB and SHALL run as a non-root user.",
+      "priority": "Must",
+      "verification": "Inspection"
+    },
+    {
+      "id": "NFR-PORT-002",
+      "category": "Portability",
+      "description": "All runtime configuration SHALL be supplied through environment variables with documented defaults; no configuration SHALL require code changes.",
+      "priority": "Must",
+      "verification": "Inspection"
+    },
+    {
+      "id": "NFR-COMPAT-001",
+      "category": "Compatibility",
+      "description": "The service SHALL run on Python 3.11 and newer and PostgreSQL 14 and newer.",
+      "priority": "Must",
+      "verification": "CI matrix"
+    },
+    {
+      "id": "NFR-USE-001",
+      "category": "Usability",
+      "description": "The OpenAPI document SHALL include a summary, description, example request, and example response for every endpoint and every error status.",
+      "priority": "Must",
+      "verification": "Inspection"
+    },
+    {
+      "id": "NFR-SCALE-001",
+      "category": "Scalability",
+      "description": "The service SHALL remain stateless so that N replicas can run behind a load balancer without sticky sessions.",
+      "priority": "Must",
+      "verification": "Inspection"
+    }
+  ],
+  "acceptanceCriteria": [
+    { "id": "AC-001", "given": "a valid TodoCreate payload", "when": "POST /api/v1/todos is called", "then": "HTTP 201 is returned with a persisted Todo containing a UUID id and a Location header." },
+    { "id": "AC-002", "given": "a payload with an empty or whitespace-only title", "when": "POST /api/v1/todos is called", "then": "HTTP 422 is returned with VALIDATION_ERROR and no record is created." },
+    { "id": "AC-003", "given": "a payload omitting description", "when": "POST /api/v1/todos is called", "then": "the created Todo has description equal to null." },
+    { "id": "AC-004", "given": "a payload omitting priority", "when": "POST /api/v1/todos is called", "then": "the created Todo has priority equal to medium." },
+    { "id": "AC-005", "given": "a payload with due_date set to not-a-date", "when": "POST /api/v1/todos is called", "then": "HTTP 422 is returned identifying due_date as invalid." },
+    { "id": "AC-006", "given": "a payload containing id and created_at", "when": "POST /api/v1/todos is called", "then": "the supplied values are ignored and server-generated values are used." },
+    { "id": "AC-007", "given": "a successful creation", "when": "the response is inspected", "then": "status is 201 and Location equals /api/v1/todos/{id}." },
+    { "id": "AC-008", "given": "a payload with three invalid fields", "when": "POST /api/v1/todos is called", "then": "HTTP 422 is returned with three entries in error.details." },
+    { "id": "AC-010", "given": "an existing Todo id", "when": "GET /api/v1/todos/{id} is called", "then": "HTTP 200 is returned with the matching Todo." },
+    { "id": "AC-011", "given": "a well-formed but unknown UUID", "when": "GET /api/v1/todos/{id} is called", "then": "HTTP 404 is returned with code TODO_NOT_FOUND." },
+    { "id": "AC-012", "given": "25 stored Todos", "when": "GET /api/v1/todos is called without parameters", "then": "HTTP 200 is returned with 20 items, total 25, limit 20, offset 0." },
+    { "id": "AC-013", "given": "limit=500", "when": "GET /api/v1/todos is called", "then": "HTTP 422 is returned because limit exceeds 100." },
+    { "id": "AC-014", "given": "10 completed and 15 active Todos", "when": "GET /api/v1/todos?completed=true is called", "then": "exactly 10 items are returned and total equals 10." },
+    { "id": "AC-015", "given": "Todos of mixed priority", "when": "GET /api/v1/todos?priority=high&priority=low is called", "then": "only high and low priority Todos are returned." },
+    { "id": "AC-016", "given": "Todos with varied due dates", "when": "GET /api/v1/todos?due_after=X&due_before=Y is called", "then": "only Todos with due_date within the inclusive range are returned." },
+    { "id": "AC-017", "given": "a Todo titled Buy Milk", "when": "GET /api/v1/todos?q=milk is called", "then": "that Todo is included in the results." },
+    { "id": "AC-018", "given": "Todos created at distinct times", "when": "GET /api/v1/todos?sort_by=created_at&order=asc is called", "then": "items are ordered oldest first with deterministic tie-breaking by id." },
+    { "id": "AC-019", "given": "any successful list request", "when": "the body is inspected", "then": "it contains exactly the keys items, total, limit, and offset." },
+    { "id": "AC-020", "given": "an existing Todo", "when": "PUT /api/v1/todos/{id} is called with a full body", "then": "all mutable fields are replaced and updated_at is advanced." },
+    { "id": "AC-021", "given": "an existing Todo with a description", "when": "PATCH /api/v1/todos/{id} is called with only completed=true", "then": "the description is unchanged and completed becomes true." },
+    { "id": "AC-022", "given": "an active Todo", "when": "PATCH sets completed=true", "then": "completed_at is populated; a subsequent PATCH setting completed=false clears completed_at to null." },
+    { "id": "AC-023", "given": "any successful mutation", "when": "the response is inspected", "then": "updated_at is strictly later than the previous updated_at." },
+    { "id": "AC-024", "given": "a PATCH with title of 201 characters", "when": "the request is processed", "then": "HTTP 422 is returned and the stored Todo is unchanged." },
+    { "id": "AC-025", "given": "an unknown UUID", "when": "PATCH /api/v1/todos/{id} is called", "then": "HTTP 404 is returned with code TODO_NOT_FOUND." },
+    { "id": "AC-026", "given": "an empty JSON object", "when": "PATCH /api/v1/todos/{id} is called", "then": "HTTP 422 is returned with code EMPTY_PATCH." },
+    { "id": "AC-030", "given": "an existing Todo", "when": "DELETE /api/v1/todos/{id} is called", "then": "HTTP 204 is returned with an empty body and the record no longer exists." },
+    { "id": "AC-031", "given": "an unknown UUID", "when": "DELETE /api/v1/todos/{id} is called", "then": "HTTP 404 is returned with code TODO_NOT_FOUND." },
+    { "id": "AC-032", "given": "a Todo already deleted", "when": "DELETE is called again", "then": "HTTP 404 is returned and no server error occurs." },
+    { "id": "AC-040", "given": "20 Todos of which 8 are completed", "when": "GET /api/v1/todos/stats is called", "then": "total is 20, completed is 8, active is 12, and by_priority sums to 20." },
+    { "id": "AC-041", "given": "an active Todo whose due_date is in the past", "when": "GET /api/v1/todos/stats is called", "then": "overdue includes that Todo." },
+    { "id": "AC-050", "given": "the process is running", "when": "GET /health is called", "then": "HTTP 200 is returned with status ok even if the database is unreachable." },
+    { "id": "AC-051", "given": "the database is unreachable", "when": "GET /ready is called", "then": "HTTP 503 is returned with database equal to down." },
+    { "id": "AC-060", "given": "any error response", "when": "the body is inspected", "then": "it conforms to the ErrorResponse schema with a non-empty code, message, and request_id." },
+    { "id": "AC-061", "given": "an injected unhandled exception", "when": "a request triggers it", "then": "HTTP 500 is returned with INTERNAL_ERROR and no stack trace or SQL text appears in the body." },
+    { "id": "AC-062", "given": "a request with X-Request-ID: abc-123", "when": "the response is inspected", "then": "the header X-Request-ID equals abc-123 and all log lines for that request carry the same value." },
+    { "id": "AC-063", "given": "the service is running", "when": "GET /openapi.json is called", "then": "a valid OpenAPI 3.1 document is returned describing all nine endpoints." },
+    { "id": "AC-064", "given": "a known path", "when": "an unsupported method is used", "then": "HTTP 405 is returned with code METHOD_NOT_ALLOWED." }
+  ],
+  "traceabilityMatrix": [
+    { "requirementId": "FR-001", "designElements": ["TodoRouter.create", "TodoService.create", "TodoRepository.insert"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-001"] },
+    { "requirementId": "FR-002", "designElements": ["TodoCreate.title validator"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-002"] },
+    { "requirementId": "FR-003", "designElements": ["TodoCreate.description"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-003"] },
+    { "requirementId": "FR-004", "designElements": ["PriorityEnum"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-004"] },
+    { "requirementId": "FR-005", "designElements": ["TodoCreate.due_date"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-005"] },
+    { "requirementId": "FR-006", "designElements": ["TodoService.create"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-006"] },
+    { "requirementId": "FR-007", "designElements": ["TodoRouter.create"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-007"] },
+    { "requirementId": "FR-008", "designElements": ["ExceptionHandler.validation"], "endpoints": ["API-001"], "acceptanceCriteria": ["AC-008"] },
+    { "requirementId": "FR-010", "designElements": ["TodoRouter.get", "TodoService.get"], "endpoints": ["API-003"], "acceptanceCriteria": ["AC-010"] },
+    { "requirementId": "FR-011", "designElements": ["TodoNotFound handler"], "endpoints": ["API-003"], "acceptanceCriteria": ["AC-011"] },
+    { "requirementId": "FR-012", "designElements": ["TodoRouter.list"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-012"] },
+    { "requirementId": "FR-013", "designElements": ["PaginationParams"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-012", "AC-013"] },
+    { "requirementId": "FR-014", "designElements": ["TodoRepository.query"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-014"] },
+    { "requirementId": "FR-015", "designElements": ["TodoRepository.query"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-015"] },
+    { "requirementId": "FR-016", "designElements": ["TodoRepository.query"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-016"] },
+    { "requirementId": "FR-017", "designElements": ["TodoRepository.query"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-017"] },
+    { "requirementId": "FR-018", "designElements": ["SortParams"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-018"] },
+    { "requirementId": "FR-019", "designElements": ["TodoListResponse"], "endpoints": ["API-002"], "acceptanceCriteria": ["AC-019"] },
+    { "requirementId": "FR-020", "designElements": ["TodoRouter.replace"], "endpoints": ["API-004"], "acceptanceCriteria": ["AC-020"] },
+    { "requirementId": "FR-021", "designElements": ["TodoRouter.patch"], "endpoints": ["API-005"], "acceptanceCriteria": ["AC-021"] },
+    { "requirementId": "FR-022", "designElements": ["TodoService.apply_completion"], "endpoints": ["API-005"], "acceptanceCriteria": ["AC-022"] },
+    { "requirementId": "FR-023", "designElements": ["TodoService.touch"], "endpoints": ["API-004", "API-005"], "acceptanceCriteria": ["AC-023"] },
+    { "requirementId": "FR-024", "designElements": ["TodoUpdate validators"], "endpoints": ["API-004", "API-005"], "acceptanceCriteria": ["AC-024"] },
+    { "requirementId": "FR-025", "designElements": ["TodoNotFound handler"], "endpoints": ["API-004", "API-005"], "acceptanceCriteria": ["AC-025"] },
+    { "requirementId": "FR-026", "designElements": ["TodoUpdate.minProperties"], "endpoints": ["API-005"], "acceptanceCriteria": ["AC-026"] },
+    { "requirementId": "FR-030", "designElements": ["TodoRouter.delete"], "endpoints": ["API-006"], "acceptanceCriteria": ["AC-030"] },
+    { "requirementId": "FR-031", "designElements": ["TodoNotFound handler"], "endpoints": ["API-006"], "acceptanceCriteria": ["AC-031"] },
+    { "requirementId": "FR-032", "designElements": ["TodoService.delete"], "endpoints": ["API-006"], "acceptanceCriteria": ["AC-032"] },
+    { "requirementId": "FR-040", "designElements": ["StatsRouter.get", "TodoRepository.aggregate"], "endpoints": ["API-007"], "acceptanceCriteria": ["AC-040"] },
+    { "requirementId": "FR-041", "designElements": ["TodoRepository.aggregate"], "endpoints": ["API-007"], "acceptanceCriteria": ["AC-041"] },
+    { "requirementId": "FR-050", "designElements": ["HealthRouter.live"], "endpoints": ["API-008"], "acceptanceCriteria": ["AC-050"] },
+    { "requirementId": "FR-051", "designElements": ["HealthRouter.ready"], "endpoints": ["API-009"], "acceptanceCriteria": ["AC-051"] },
+    { "requirementId": "FR-060", "designElements": ["ErrorResponse", "ExceptionHandlers"], "endpoints": ["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "API-007"], "acceptanceCriteria": ["AC-060"] },
+    { "requirementId": "FR-061", "designElements": ["UnhandledExceptionHandler"], "endpoints": ["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "API-007"], "acceptanceCriteria": ["AC-061"] },
+    { "requirementId": "FR-062", "designElements": ["RequestIDMiddleware"], "endpoints": ["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "API-007", "API-008", "API-009"], "acceptanceCriteria": ["AC-062"] },
+    { "requirementId": "FR-063", "designElements": ["FastAPI app configuration"], "endpoints": ["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "API-007", "API-008", "API-009"], "acceptanceCriteria": ["AC-063"] },
+    { "requirementId": "FR-064", "designElements": ["MethodNotAllowedHandler"], "endpoints": ["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "API-007"], "acceptanceCriteria": ["AC-064"] }
+  ],
+  "risks": [
+    {
+      "id": "RISK-001",
+      "description": "Unbounded list queries degrade database performance as the dataset grows.",
+      "likelihood": "Medium",
+      "impact": "High",
+      "mitigation": "Enforce limit maximum of 100, add supporting indexes, and monitor slow query logs."
+    },
+    {
+      "id": "RISK-002",
+      "description": "Case-insensitive substring search (q) cannot use a standard btree index and will degrade at scale.",
+      "likelihood": "High",
+      "impact": "Medium",
+      "mitigation": "Add a pg_trgm GIN index on title and description; document the search semantics as substring-only."
+    },
+    {
+      "id": "RISK-003",
+      "description": "Absence of authentication allows unrestricted access if the service is exposed publicly.",
+      "likelihood": "Medium",
+      "impact": "High",
+      "mitigation": "Deploy behind a private network or gateway; authentication is a documented v2 candidate."
+    },
+    {
+      "id": "RISK-004",
+      "description": "Concurrent PATCH requests on the same Todo may produce lost updates.",
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "mitigation": "Apply updates within a single transaction using row-level locking (SELECT FOR UPDATE); ETag/If-Match is a v2 candidate."
+    },
+    {
+      "id": "RISK-005",
+      "description": "Clock skew between application replicas could produce non-monotonic updated_at values.",
+      "likelihood": "Low",
+      "impact": "Low",
+      "mitigation": "Generate timestamps with the database clock (now()) rather than the application clock."
+    }
+  ],
+  "futureConsiderations": [
+    "Token-based authentication and per-user Todo ownership.",
+    "ETag and If-Match conditional requests for optimistic concurrency.",
+    "Soft delete with a deleted_at column and restore endpoint.",
+    "Bulk create and bulk update endpoints.",
+    "Cursor-based pagination for large collections.",
+    "Recurring tasks and reminder scheduling.",
+    "Webhook or SSE notifications on state change."
+  ],
+  "glossaryOfErrorCodes": [
+    { "code": "VALIDATION_ERROR", "retryable": false },
+    { "code": "TODO_NOT_FOUND", "retryable": false },
+    { "code": "EMPTY_PATCH", "retryable": false },
+    { "code": "METHOD_NOT_ALLOWED", "retryable": false },
+    { "code": "NOT_FOUND", "retryable": false },
+    { "code": "INTERNAL_ERROR", "retryable": true },
+    { "code": "SERVICE_UNAVAILABLE", "retryable": true }
+  ],
+  "approval": {
+    "requiredSignOff": ["Product Owner", "Lead Architect", "QA Lead"],
+    "status": "Pending",
+    "notes": "This SRS is complete and internally consistent. All Must-priority requirements are verifiable and traceable to at least one acceptance criterion."
+  }
+}
